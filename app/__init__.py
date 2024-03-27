@@ -18,7 +18,8 @@ def create_app():
     migrate = Migrate(app, db)
 
     # Import and register your blueprint after initializing db
-    from app.routes import user_blueprint  # Moved inside create_app
+    from app.routes import user_blueprint, material_blueprint  # Moved inside create_app
     app.register_blueprint(user_blueprint, url_prefix='/api')
+    app.register_blueprint(material_blueprint, url_prefix='/api/material')
 
     return app

@@ -1,0 +1,20 @@
+
+# Ignore Dockerfile and docker-compose files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+.env
+__pycache__
+venv
+*.db
+data
+migrations
+
+# OS generated files
+.DS_Store
+
+# Ignore Git and version control
+.git
+.gitignore
+

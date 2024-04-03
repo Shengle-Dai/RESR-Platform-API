@@ -9,10 +9,4 @@ RUN mkdir data
 
 RUN pip install -r requirements.txt
 
-RUN flask db init
-
-RUN flask db migrate
-
-RUN flask db upgrade
-
-CMD python run.py
+CMD ["sh", "-c", "flask db upgrade && python run.py"]

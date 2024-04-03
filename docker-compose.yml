@@ -2,10 +2,10 @@ version: "3"
 
 services:
   demo:
-    image: hoopoed/RESR-Management:latest
+    image: hoopoed/resr-management:latest
     volumes:
       - /home/daishengle20050809/app.db:/usr/app/data/app.db
     ports:
-      - "80:8000"
+      - "80:5000"
     env_file:
       - .env

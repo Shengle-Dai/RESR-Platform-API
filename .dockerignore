@@ -9,7 +9,6 @@ __pycache__
 venv
 *.db
 data
-migrations
 
 # OS generated files
 .DS_Store

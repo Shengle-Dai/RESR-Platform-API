@@ -27,88 +27,139 @@ class User(db.Model):
             "username": self.username
         }
     
-class MaterialMainCategory(db.Model):
+class CoatingCategory(db.Model):
     """
-    Material Main Category Model
+    Coating Category Model
     """
 
-    __tablename__ = "material_main_category"
+    __tablename__ = "coating_category"
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String, unique=True, nullable=False)
-
-    # Relationship: A main category has many subcategories
-    subcategories = db.relationship('MaterialSubCategory', backref='material_main_category', lazy=True)
+    coatings = db.relationship('Coating', backref='coating_category', lazy=True)
+    images = db.relationship('Image', backref='coating_category', lazy=True)
 
     def __init__(self, **kwargs):
         """
-        Initialize a material main category object
+        Initialize a coating category object
         """
         self.name = kwargs.get("name", "")
 
     def serialize(self):
         """
-        Serialize a material main category object
+        Serialize a coating category object
+        """
+        return {
+            "id": self.id,
+            "name": self.name,
+            "coatings": [coating.serialize() for coating in self.coatings],
+            "images": [image.serialize() for image in self.images]
+        }
+    
+    def simple_serialize(self):
+        """
+        Serialize a coating category object
         """
         return {
             "id": self.id,
             "name": self.name
         }
+    
 
-
-class MaterialSubCategory(db.Model):
+class Coating(db.Model):
     """
-    Material Sub Category Model
+    Coating Model
     """
 
-    __tablename__ = "material_sub_category"
+    __tablename__ = "coating"
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    name = db.Column(db.String, unique=True, nullable=False)
-    material_main_category_id = db.Column(db.Integer, db.ForeignKey('material_main_category.id'), nullable=False)
-
-    # Relationship: A subcategory has many materials
-    materials = db.relationship('Material', backref='material_sub_category', lazy=True)
+    sub_category = db.Column(db.String, nullable=False)
+    thickness = db.Column(db.String, nullable=False)
+    color = db.Column(db.String, nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('coating_category.id'), nullable=False)
 
     def __init__(self, **kwargs):
         """
-        Initialize a material sub category object
+        Initialize a coating object
         """
-        self.name = kwargs.get("name", "")
-        self.material_main_category_id = kwargs.get("material_main_category_id")
+        self.sub_category = kwargs.get("sub_category", "")
+        self.thickness = kwargs.get("thickness", "")
+        self.color = kwargs.get("color", "")
+        self.category_id = kwargs.get("category_id", -1)
 
     def serialize(self):
         """
-        Serialize a material sub category object
+        Serialize a coating object
         """
         return {
             "id": self.id,
-            "name": self.name,
-            "material_main_category_id": self.material_main_category_id
+            "main_category": CoatingCategory.query.get(self.category_id).name,
+            "sub_category": self.sub_category,
+            "thickness": self.thickness,
+            "color": self.color
         }
-
-
-class Material(db.Model):
+    
+class Shape(db.Model):
     """
-    Material Model
+    Shape Model
     """
 
-    __tablename__ = "material"
+    __tablename__ = "shape"
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String, unique=True, nullable=False)
-    material_sub_category_id = db.Column(db.Integer, db.ForeignKey('material_sub_category.id'), nullable=False)
+    images = db.relationship('Image', backref='shape', lazy=True)
 
     def __init__(self, **kwargs):
         """
-        Initialize a material object
+        Initialize a shape object
         """
         self.name = kwargs.get("name", "")
-        self.material_sub_category_id = kwargs.get("material_sub_category_id")
+
 
     def serialize(self):
         """
-        Serialize a material object
+        Serialize a shape object
         """
         return {
             "id": self.id,
             "name": self.name,
-            "material_sub_category_id": self.material_sub_category_id
+            "images": [image.serialize() for image in self.images]
+        }
+    
+    def simple_serialize(self):
+        """
+        Serialize a shape object
+        """
+        return {
+            "id": self.id,
+            "name": self.name
+        }
+    
+class Image(db.Model):
+    """
+    Image Model
+    """
+
+    __tablename__ = "image"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String, nullable=False)
+    base64_data = db.Column(db.String, nullable=False)
+    shape_id = db.Column(db.Integer, db.ForeignKey('shape.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('coating_category.id'), nullable=False)
+
+    def __init__(self, **kwargs):
+        """
+        Initialize an image object
+        """
+        self.base64_data = kwargs.get("base64_data", "")
+        self.name = kwargs.get("name", "")
+        self.shape_id = kwargs.get("shape_id", -1)
+        self.category_id = kwargs.get("category_id", -1)
+
+    def serialize(self):
+        """
+        Serialize an image object
+        """
+        return {
+            "id": self.id,
+            "base64_data": self.base64_data
         }

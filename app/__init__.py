@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from config import Config
 
-# Initialize SQLAlchemy and Migrate here
+# Initialize SQLAlchemy and Migrate
 db = SQLAlchemy()
 migrate = None
 
@@ -13,13 +13,14 @@ def create_app():
 
     db.init_app(app)
     
-    # Initialize Migrate here
+    # Initialize Migration
     global migrate
     migrate = Migrate(app, db)
 
     # Import and register your blueprint after initializing db
-    from app.routes import user_blueprint, material_blueprint  # Moved inside create_app
-    app.register_blueprint(user_blueprint, url_prefix='/api')
-    app.register_blueprint(material_blueprint, url_prefix='/api/material')
+    from app.routes import user_blueprint, coating_blueprint, shape_blueprint
+    app.register_blueprint(user_blueprint, url_prefix='/api/users')
+    app.register_blueprint(coating_blueprint, url_prefix='/api/coatings')
+    app.register_blueprint(shape_blueprint, url_prefix='/api/shapes')
 
     return app

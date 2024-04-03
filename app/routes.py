@@ -2,8 +2,8 @@ from flask import request, jsonify, Blueprint, current_app
 import pandas as pd
 from werkzeug.utils import secure_filename
 from app import db
-from app.models import User, MaterialMainCategory, MaterialSubCategory, Material
-import os
+from app.models import User, Coating, CoatingCategory, Shape, Image
+import base64, shutil, tempfile, io, os, zipfile
 
 
 #### GENERALIZE RETURN ####
@@ -41,48 +41,17 @@ def process_excel_file(filepath):
 def allowed_file_excel(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'xlsx', 'xls'}
 
-def load_data_to_database(df):
-    for index, row in df.iterrows():
-        main_category_name = row['maincategory']
-        sub_category_name = row['subcategory']
-        material_name = row['material']
-
-        # Find or create the main category
-        main_category = MaterialMainCategory.query.filter_by(name=main_category_name).first()
-        if not main_category:
-            main_category = MaterialMainCategory(name=main_category_name)
-            db.session.add(main_category)
-            db.session.commit()  # Commit to obtain the main category ID
-
-        # Find or create the sub category
-        sub_category = MaterialSubCategory.query.filter_by(name=sub_category_name, material_main_category_id=main_category.id).first()
-        if not sub_category:
-            sub_category = MaterialSubCategory(name=sub_category_name, material_main_category_id=main_category.id)
-            db.session.add(sub_category)
-            db.session.commit()  # Commit to obtain the sub category ID
-
-        # Find or create the material
-        material = Material.query.filter_by(name=material_name, material_sub_category_id=sub_category.id).first()
-        if not material:
-            material = Material(name=material_name, material_sub_category_id=sub_category.id)
-            db.session.add(material)
-        
-        # Batch commit: Commit after every 10 records
-        if index % 10 == 0:
-            db.session.commit()
-
-    db.session.commit()  # Commit any remaining records
-
 
 ### BLUEPRINTS ###
 
 user_blueprint = Blueprint('user_blueprint', __name__)
-material_blueprint = Blueprint('material_blueprint', __name__)
+coating_blueprint = Blueprint('coating_blueprint', __name__)
+shape_blueprint = Blueprint('shape_blueprint', __name__)
 
 
 ### USER ROUTES ###
 
-@user_blueprint.route('/users', methods=['POST'])
+@user_blueprint.route('/', methods=['POST'])
 def create_user():
     """
     Create a new user
@@ -100,7 +69,7 @@ def create_user():
 
     return success_response(new_user.serialize(), 201)
 
-@user_blueprint.route('/users', methods=['GET'])
+@user_blueprint.route('/', methods=['GET'])
 def get_users():
     """
     Get all users
@@ -109,53 +78,276 @@ def get_users():
     return success_response([user.serialize() for user in users])
 
 
-### MATERIAL ROUTES ###
+### COATING ROUTES ###
 
-@material_blueprint.route('/upload-materials', methods=['POST'])
-def upload_materials():
-    # Check if a file is in the request
+@coating_blueprint.route('/categories', methods=['GET'])
+def get_all_coating_categories():
+    """
+    Get all coating categories
+    """
+    categories = CoatingCategory.query.all()
+    return success_response([category.simple_serialize() for category in categories])
+
+@coating_blueprint.route('/categories', methods=['POST'])
+def create_coating_category():
+    """
+    Create a new coating category
+    """
+    data = request.json
+    name = data.get('name')
+
+    if not name:
+        return failure_response("Missing name", 400)
+
+    new_category = CoatingCategory(name=name)
+    db.session.add(new_category)
+    db.session.commit()
+
+    return success_response(new_category.serialize(), 201)
+
+@coating_blueprint.route('/categories/<int:category_id>', methods=['GET'])
+def get_coating_category(category_id):
+    """
+    Get a coating category by ID
+    """
+    category = CoatingCategory.query.get(category_id)
+    if category:
+        return success_response(category.serialize())
+    return failure_response("Category not found", 404)
+
+@coating_blueprint.route('/', methods=['GET'])
+def get_all_coatings():
+    """
+    Get all coatings
+    """
+    coatings = Coating.query.all()
+    return success_response([coating.serialize() for coating in coatings])
+
+@coating_blueprint.route('/<int:coating_id>', methods=['GET'])
+def get_coating(coating_id):
+    """
+    Get a coating by ID
+    """
+    coating = Coating.query.get(coating_id)
+    if coating:
+        return success_response(coating.serialize())
+    return failure_response("Coating not found", 404)
+
+@coating_blueprint.route('/', methods=['POST'])
+def create_coating():
+    """
+    Create a new coating
+    """
+    data = request.json
+    name = data.get('name')
+    sub_category = data.get('sub_category')
+    thickness = data.get('thickness')
+    color = data.get('color')
+
+    if not name or not sub_category or not thickness or not color:
+        return failure_response("Missing required fields", 400)
+
+    new_coating = Coating(name=name, sub_category=sub_category, thickness=thickness, color=color)
+    db.session.add(new_coating)
+    db.session.commit()
+
+    return success_response(new_coating.serialize(), 201)
+
+@coating_blueprint.route('/upload_excel', methods=['POST'])
+def upload_coatings():
     if 'file' not in request.files:
-        return failure_response('No file part in the request', 400)
+        return jsonify({'error': 'No file part in the request'}), 400
 
     file = request.files['file']
+    file_extension = os.path.splitext(file.filename)[1]
 
-    # If user does not select file, browser also submits an empty part without filename
+    if file_extension.lower() == '.xls':
+        df = pd.read_excel(file, engine='xlrd')
+    elif file_extension.lower() == '.xlsx':
+        df = pd.read_excel(file, engine='openpyxl')
+    else:
+        return jsonify({'error': 'Invalid file format'}), 400
+
+    df.columns = df.columns.str.lower().str.replace(' ', '')
+
+    for index, row in df.iterrows():
+        # Check and create CoatingCategory if needed
+        category_name = row['category']
+        category = CoatingCategory.query.filter_by(name=category_name).first()
+        if not category:
+            category = CoatingCategory(name=category_name)
+            db.session.add(category)
+            db.session.flush()  # To get the category_id before committing
+
+        # Create a new Coating
+        new_coating = Coating(sub_category=row['subcategory'],
+                              thickness=row['thickness'], color=row['color'], category_id=category.id)
+        db.session.add(new_coating)
+
+    db.session.commit()
+    return jsonify({'message': 'Coatings uploaded successfully'}), 201
+
+@coating_blueprint.route('/categories/upload_zip', methods=['POST'])
+def upload_categories_from_zip():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
+
+    zip_file = request.files['file']
+    if not zip_file.filename.endswith('.zip'):
+        return jsonify({'error': 'The file must be a zip'}), 400
+
+    # Unzip the file into a temporary directory
+    temp_dir = tempfile.mkdtemp()
+    with zipfile.ZipFile(io.BytesIO(zip_file.read())) as z:
+        z.extractall(temp_dir)
+
+    # Process each directory in the first level directory of the extracted folder
+    first_level_directory = next(os.walk(temp_dir))[1][0]
+    category_dir = os.path.join(temp_dir, first_level_directory)
+
+    for category_name in os.listdir(category_dir):
+        if category_name == '__MACOSX':
+            continue
+        category_path = os.path.join(category_dir, category_name)
+        if os.path.isdir(category_path):
+            # Create a new coating category or get existing one
+            category = CoatingCategory.query.filter_by(name=category_name).first()
+            if not category:
+                category = CoatingCategory(name=category_name)
+                db.session.add(category)
+                db.session.flush()  # To get the category_id before committing
+
+            # Process each image file inside the category's folder
+            for file_name in os.listdir(category_path):
+                file_path = os.path.join(category_path, file_name)
+                if file_name.endswith(('.png', '.jpg', '.jpeg')):
+                    with open(file_path, 'rb') as file:
+                        file_content = file.read()
+                        base64_data = base64.b64encode(file_content).decode('utf-8')
+
+                        # Save the image to the database
+                        new_image = Image(name=secure_filename(file_name), 
+                                          base64_data=base64_data, 
+                                          category_id=category.id)
+                        db.session.add(new_image)
+
+    db.session.commit()
+
+    # Clean up the temporary directory
+    shutil.rmtree(temp_dir)
+
+    return jsonify({'message': 'Coating categories and images uploaded successfully'}), 201
+
+
+### SHAPE ROUTES ###
+
+@shape_blueprint.route('/', methods=['GET'])
+def get_all_shapes():
+    """
+    Get all shapes
+    """
+    shapes = Shape.query.all()
+    return jsonify([shape.simple_serialize() for shape in shapes]), 200
+
+@shape_blueprint.route('/<int:shape_id>', methods=['GET'])
+def get_shape(shape_id):
+    """
+    Get a shape by ID
+    """
+    shape = Shape.query.get(shape_id)
+    if shape:
+        return jsonify(shape.serialize()), 200
+    return failure_response("Shape not found", 404)
+
+@shape_blueprint.route('/', methods=['POST'])
+def create_shape():
+    """
+    Create a new shape
+    """
+    data = request.json
+    name = data.get('name')
+
+    if name == None:
+        return failure_response("Missing name", 400)
+
+    new_shape = Shape(name=name)
+    db.session.add(new_shape)
+    db.session.commit()
+
+    return success_response(new_shape.serialize(), 201)
+
+@shape_blueprint.route('/<int:shape_id>/images', methods=['POST'])
+def upload_shape_image(shape_id):
+    """
+    Upload an image for a shape as a base64 string
+    """
+    shape = Shape.query.get(shape_id)
+    if shape is None:
+        return jsonify({"error": "Shape not found"}), 404
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
+
+    file = request.files['file']
     if file.filename == '':
-        return failure_response('No selected file', 400)
+        return jsonify({'error': 'No selected file'}), 400
 
-    # Check if file has allowed extension (you may define a function for this)
-    if not file or not allowed_file_excel(file.filename):
-        return failure_response('Invalid file type', 400)
+    # Read the file and encode it to base64
+    file_content = file.read()
+    base64_data = base64.b64encode(file_content).decode('utf-8')
 
-    # Make filename safe, remove unsupported chars
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
+    # Save the image to the database
+    new_image = Image(name=secure_filename(file.filename), base64_data=base64_data, shape_id=shape_id)
+    db.session.add(new_image)
+    db.session.commit()
 
-    # Process the uploaded file
-    try:
-        df = process_excel_file(filepath)
-        load_data_to_database(df)
-    except Exception as e:
-        return failure_response(f"An error occurred: {str(e)}", 500)
-    finally:
-        # Clean up the uploaded file
-        if os.path.exists(filepath):
-            os.remove(filepath)
+    return jsonify(new_image.serialize()), 201
 
-    return success_response(f"File {filename} uploaded and processed successfully", 201)
+import os
 
-@material_blueprint.route('/materials', methods=['GET'])
-def get_all_materials():
-    materials = Material.query.all()
-    return jsonify([material.serialize() for material in materials]), 200
+@shape_blueprint.route('/upload_zip', methods=['POST'])
+def upload_shapes_from_zip():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request'}), 400
 
-@material_blueprint.route('/subcategories', methods=['GET'])
-def get_all_subcategories():
-    subcategories = MaterialSubCategory.query.all()
-    return jsonify([subcategory.serialize() for subcategory in subcategories]), 200
+    zip_file = request.files['file']
+    if not zip_file.filename.endswith('.zip'):
+        return jsonify({'error': 'The file must be a zip'}), 400
 
-@material_blueprint.route('/maincategories', methods=['GET'])
-def get_all_main_categories():
-    main_categories = MaterialMainCategory.query.all()
-    return jsonify([main_category.serialize() for main_category in main_categories]), 200
+    # Unzip the file into a temporary directory
+    temp_dir = tempfile.mkdtemp()
+    with zipfile.ZipFile(io.BytesIO(zip_file.read())) as z:
+        z.extractall(temp_dir)
+
+    # Process each directory in the first level directory of the extracted folder
+    first_level_directory = next(os.walk(temp_dir))[1][0]
+    shape_dir = os.path.join(temp_dir, first_level_directory)
+
+    for shape_name in os.listdir(shape_dir):
+        if shape_name == '__MACOSX':
+            continue
+        shape_path = os.path.join(shape_dir, shape_name)
+        if os.path.isdir(shape_path):
+            # Create a new shape for each folder
+            new_shape = Shape(name=shape_name)
+            db.session.add(new_shape)
+            db.session.flush()  # To get the shape_id before committing
+
+            # Process each image file inside the shape's folder
+            for file_name in os.listdir(shape_path):
+                file_path = os.path.join(shape_path, file_name)
+                if file_name.endswith(('.png', '.jpg', '.jpeg')):
+                    with open(file_path, 'rb') as file:
+                        file_content = file.read()
+                        base64_data = base64.b64encode(file_content).decode('utf-8')
+
+                        # Save the image to the database
+                        new_image = Image(name=secure_filename(file_name), base64_data=base64_data, shape_id=new_shape.id)
+                        db.session.add(new_image)
+
+    db.session.commit()
+
+    # Clean up the temporary directory
+    shutil.rmtree(temp_dir)
+
+    return jsonify({'message': 'Shapes and images uploaded successfully'}), 201
